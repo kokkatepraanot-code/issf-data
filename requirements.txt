@@ -6,3 +6,27 @@ numpy
 scikit-learn
 plotly
 
+# Bytecode
+__pycache__/
+*.py[cod]
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# SQLite
+*.sqlite
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# VS/Visual Studio build files
+.vs/
+
+# Streamlit
+.streamlit/config.toml
+
+# Env
+.env
+.venv/
+venv/
