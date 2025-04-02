@@ -6,8 +6,31 @@ import streamlit as st
 import seaborn as sns
 from io import BytesIO
 
-# Set page config
-st.set_page_config(page_title="IB Diploma Dashboard", layout="wide")
+# === Simple Login Credentials ===
+USER_CREDENTIALS = {
+    "admin": "gojags2025"
+}
+
+# === Login Check ===
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔐 Login Required")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    login_btn = st.button("Login")
+
+    if login_btn:
+        if username in USER_CREDENTIALS and USER_CREDENTIALS[username] == password:
+            st.session_state.authenticated = True
+            st.success("✅ Login successful. Loading dashboard...")
+            st.experimental_rerun()
+        else:
+            st.error("❌ Invalid username or password")
+
+    st.stop()  # Stop rendering the rest of the app until authenticated
+
 
 # Remove top margin
 st.markdown("""
