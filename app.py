@@ -25,7 +25,7 @@ if not st.session_state.authenticated:
         if username in USER_CREDENTIALS and USER_CREDENTIALS[username] == password:
             st.session_state.authenticated = True
             st.success("✅ Login successful. Loading dashboard...")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("❌ Invalid username or password")
 
