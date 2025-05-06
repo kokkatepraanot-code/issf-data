@@ -265,7 +265,8 @@ with tab2:
     "📈 Average Total Points Over Time",
     "🏆 Subject Performance Over Time",
     "🎓 Pass Rate Trends for DIPLOMA Candidates",
-    "📚 IB Group-Wise Subject Trends"
+    "📚 IB Group-Wise Subject Trends",
+    "📤 Compare School vs World Averages (Upload PDFs)"
 
 ]
     
@@ -831,41 +832,44 @@ with tab2:
         ax.grid(True)
         st.pyplot(fig)
 
-        # === IB World Average Comparison Upload and Visualization ===
-        
+
+    elif selected_trend == "📤 Compare School vs World Averages (Upload PDFs)":
         import pdfplumber
         import re
 
-        st.markdown("#### 5. 📤 Compare School vs World Averages (Upload PDFs)")
+        st.markdown("### 📤 Upload and Compare School vs World Averages by Group")
 
         if "world_avg_data" not in st.session_state:
             st.session_state.world_avg_data = {}
 
-        # PDF upload
         year_input = st.text_input("Year of the Uploaded PDF")
         uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type=["pdf"])
 
         def extract_avg_grades_from_pdf(pdf_file):
             results = []
+            current_group = None
             with pdfplumber.open(pdf_file) as pdf:
                 for page in pdf.pages:
                     text = page.extract_text()
                     lines = text.split('\n')
                     for line in lines:
-                        # Regex to match: SUBJECT NAME .... school_avg world_avg
+                        group_match = re.match(r"Subject Group (\d)", line)
+                        if group_match:
+                            current_group = int(group_match.group(1))
+                            continue
                         match = re.search(r'(.+?)\s+[\d\sPN]+\s+([\d.]+)\s+([\d.]+)\s+\d+\s+\d+$', line)
-                        if match:
+                        if match and current_group:
                             subject = match.group(1).strip()
                             school_avg = float(match.group(2))
                             world_avg = float(match.group(3))
                             results.append({
+                                "Group": current_group,
                                 "Subject": subject,
                                 "School Avg": school_avg,
                                 "World Avg": world_avg
                             })
             return pd.DataFrame(results)
 
-        # Handle upload
         if uploaded_pdf and year_input:
             try:
                 data = extract_avg_grades_from_pdf(uploaded_pdf)
@@ -877,21 +881,24 @@ with tab2:
             except Exception as e:
                 st.error(f"❌ Error processing PDF: {e}")
 
-        # Dropdown to pick year for comparison
         if st.session_state.world_avg_data:
-            selected_comparison_year = st.selectbox("Compare School vs World Averages for Year", list(st.session_state.world_avg_data.keys()))
+            years_available = sorted(st.session_state.world_avg_data.keys(), reverse=True)
+            selected_comparison_year = st.selectbox("Select Year for Comparison", years_available)
             df_compare = st.session_state.world_avg_data[selected_comparison_year]
 
-            st.markdown(f"#### 📊 Comparison for {selected_comparison_year}")
+            available_groups = sorted(df_compare["Group"].unique())
+            selected_group = st.selectbox("Select IB Group", available_groups, format_func=lambda g: f"{g} - Group")
+
+            group_df = df_compare[df_compare["Group"] == selected_group].sort_values("Subject")
+
+            st.markdown(f"#### 📊 Group {selected_group} — School vs World Average ({selected_comparison_year})")
             fig, ax = plt.subplots(figsize=(10, 5))
-            df_compare_sorted = df_compare.sort_values("Subject")
-            x = range(len(df_compare_sorted))
-            ax.bar(x, df_compare_sorted["School Avg"], width=0.4, label="School", align="center")
-            ax.bar([i + 0.4 for i in x], df_compare_sorted["World Avg"], width=0.4, label="World", align="center")
+            x = range(len(group_df))
+            ax.bar(x, group_df["School Avg"], width=0.4, label="School", align="center")
+            ax.bar([i + 0.4 for i in x], group_df["World Avg"], width=0.4, label="World", align="center")
             ax.set_xticks([i + 0.2 for i in x])
-            ax.set_xticklabels(df_compare_sorted["Subject"], rotation=90)
+            ax.set_xticklabels(group_df["Subject"], rotation=90)
             ax.set_ylabel("Average Grade")
-            ax.set_title(f"School vs World Average by Subject ({selected_comparison_year})")
+            ax.set_title(f"School vs World Averages – Group {selected_group} – {selected_comparison_year}")
             ax.legend()
             st.pyplot(fig)
-
