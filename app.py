@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import streamlit as st
 import seaborn as sns
 from io import BytesIO
-import fitz  # PyMuPDF
+
 
 # === Simple Login Credentials ===
 USER_CREDENTIALS = {
