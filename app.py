@@ -833,88 +833,65 @@ with tab2:
 
         # === IB World Average Comparison Upload and Visualization ===
         
-        import fitz  # PyMuPDF
-        st.markdown("---")
-        st.markdown("### 📄 Upload IB World Averages PDF")
+        import pdfplumber
+        import re
 
-        # Initialize session state to store multiple PDFs
-        if "world_avg_by_year" not in st.session_state:
-            st.session_state.world_avg_by_year = {}
+        st.markdown("#### 5. 📤 Compare School vs World Averages (Upload PDFs)")
 
-        with st.expander("Upload PDF"):
-            uploaded_year = st.number_input("Year of the Uploaded PDF", min_value=2000, max_value=2100, step=1)
-            uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type="pdf", key=f"pdf_{uploaded_year}")
+        if "world_avg_data" not in st.session_state:
+            st.session_state.world_avg_data = {}
 
-            if uploaded_pdf and uploaded_year:
-                doc = fitz.open(stream=uploaded_pdf.read(), filetype="pdf")
-                text = "".join([page.get_text() for page in doc])
+        # PDF upload
+        year_input = st.text_input("Year of the Uploaded PDF")
+        uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type=["pdf"])
 
-                subject_lines = [line for line in text.split("\n") if "%" in line and "School" in line and "World" in line]
-
-                parsed_rows = []
-                for line in subject_lines:
-                    parts = line.strip().split()
-                    try:
-                        if len(parts) >= 5:
-                            world_avg = float(parts[-1])
-                            school_avg = float(parts[-2])
-                            candidates = parts[-3]
-                            subject = " ".join(parts[:-3])
-                            parsed_rows.append({
+        def extract_avg_grades_from_pdf(pdf_file):
+            results = []
+            with pdfplumber.open(pdf_file) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    lines = text.split('\n')
+                    for line in lines:
+                        # Regex to match: SUBJECT NAME .... school_avg world_avg
+                        match = re.search(r'(.+?)\s+[\d\sPN]+\s+([\d.]+)\s+([\d.]+)\s+\d+\s+\d+$', line)
+                        if match:
+                            subject = match.group(1).strip()
+                            school_avg = float(match.group(2))
+                            world_avg = float(match.group(3))
+                            results.append({
                                 "Subject": subject,
-                                "Candidates": candidates,
                                 "School Avg": school_avg,
                                 "World Avg": world_avg
                             })
-                    except ValueError:
-                        continue
+            return pd.DataFrame(results)
 
-                if parsed_rows:
-                    st.session_state.world_avg_by_year[uploaded_year] = pd.DataFrame(parsed_rows)
-                    st.success(f"✅ Data extracted and stored for year {uploaded_year}")
+        # Handle upload
+        if uploaded_pdf and year_input:
+            try:
+                data = extract_avg_grades_from_pdf(uploaded_pdf)
+                if not data.empty:
+                    st.session_state.world_avg_data[year_input] = data
+                    st.success(f"✅ Extracted data for year {year_input}.")
                 else:
-                    st.warning("No valid data extracted from PDF.")
+                    st.warning("⚠️ No valid data extracted from PDF.")
+            except Exception as e:
+                st.error(f"❌ Error processing PDF: {e}")
 
-        # === Comparison Section ===
-        if st.session_state.world_avg_by_year:
-            st.markdown("### 🧮 Compare School vs World Averages")
-            available_years = sorted(st.session_state.world_avg_by_year.keys())
-            compare_year = st.selectbox("Select Year to Compare", available_years)
+        # Dropdown to pick year for comparison
+        if st.session_state.world_avg_data:
+            selected_comparison_year = st.selectbox("Compare School vs World Averages for Year", list(st.session_state.world_avg_data.keys()))
+            df_compare = st.session_state.world_avg_data[selected_comparison_year]
 
-            world_df = st.session_state.world_avg_by_year[compare_year]
-            school_df = df1[df1["Year"] == compare_year]
+            st.markdown(f"#### 📊 Comparison for {selected_comparison_year}")
+            fig, ax = plt.subplots(figsize=(10, 5))
+            df_compare_sorted = df_compare.sort_values("Subject")
+            x = range(len(df_compare_sorted))
+            ax.bar(x, df_compare_sorted["School Avg"], width=0.4, label="School", align="center")
+            ax.bar([i + 0.4 for i in x], df_compare_sorted["World Avg"], width=0.4, label="World", align="center")
+            ax.set_xticks([i + 0.2 for i in x])
+            ax.set_xticklabels(df_compare_sorted["Subject"], rotation=90)
+            ax.set_ylabel("Average Grade")
+            ax.set_title(f"School vs World Average by Subject ({selected_comparison_year})")
+            ax.legend()
+            st.pyplot(fig)
 
-            # Compute school average per subject for this year
-            school_subject_avg = (
-                school_df.groupby("Subject")["Subject grade"]
-                .mean()
-                .reset_index()
-                .rename(columns={"Subject grade": "School Avg"})
-            )
-
-            # Merge with world data
-            merged = pd.merge(world_df, school_subject_avg, on="Subject", suffixes=("_PDF", "_Local"))
-
-            if not merged.empty:
-                fig, ax = plt.subplots(figsize=(10, len(merged) * 0.35))
-                bar_width = 0.35
-                x = range(len(merged))
-
-                ax.barh([i - bar_width/2 for i in x], merged["School Avg"], height=bar_width, label="School Avg")
-                ax.barh([i + bar_width/2 for i in x], merged["World Avg"], height=bar_width, label="World Avg")
-
-                ax.set_yticks(list(x))
-                ax.set_yticklabels(merged["Subject"])
-                ax.set_xlabel("Average Grade")
-                ax.set_xlim(0, 7)
-                ax.set_title(f"School vs World Averages - {compare_year}")
-                ax.legend()
-                ax.grid(axis="x", linestyle="--", alpha=0.6)
-                st.pyplot(fig)
-
-                with st.expander("📋 View Comparison Table"):
-                    st.dataframe(merged[["Subject", "School Avg", "World Avg"]].sort_values("School Avg", ascending=False))
-            else:
-                st.warning(f"No matching subjects found for comparison in {compare_year}.")
-        else:
-            st.info("📂 Upload at least one PDF to enable year-by-year comparisons.")
