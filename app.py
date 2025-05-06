@@ -833,7 +833,7 @@ with tab2:
 
         # === IB World Average Comparison Upload and Visualization ===
         
-
+        import fitz  # PyMuPDF
         st.markdown("---")
         st.markdown("### 📄 Upload IB World Averages PDF")
 
