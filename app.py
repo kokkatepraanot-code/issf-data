@@ -836,40 +836,38 @@ with tab2:
     elif selected_trend == "📤 Compare School vs World Averages (Upload PDFs)":
         st.markdown("### 📤 Compare School vs World Averages (Upload PDFs)")
 
-        # Initialize store in session state
+        import pdfplumber
+
+        # Persistent store in session
         if "uploaded_subject_data" not in st.session_state:
             st.session_state.uploaded_subject_data = {}
 
         year_input = st.text_input("Year of the Uploaded PDF", value="2024")
         uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type="pdf")
 
+        def extract_subject_table(pdf_file):
+            subject_data = []
+            with pdfplumber.open(pdf_file) as pdf:
+                for page in pdf.pages:
+                    table = page.extract_table()
+                    if table:
+                        for row in table:
+                            if len(row) >= 11:
+                                subject = row[0]
+                                school_avg = row[-4]
+                                world_avg = row[-3]
+                                try:
+                                    subject_data.append({
+                                        "Subject": subject.strip(),
+                                        "Avg School": float(school_avg),
+                                        "Avg World": float(world_avg)
+                                    })
+                                except:
+                                    continue
+            return pd.DataFrame(subject_data)
+
         if uploaded_pdf and year_input:
-            import fitz  # PyMuPDF
-            import re
-
-            def extract_subject_data(pdf_bytes):
-                doc = fitz.open(stream=pdf_bytes.read(), filetype="pdf")
-                subject_data = []
-                for page in doc:
-                    text = page.get_text()
-                    lines = text.split("\n")
-                    for i, line in enumerate(lines):
-                        match = re.match(r"^(.+?)\s+(\d+)\s+((?:\d+\s+){7})\d+\.\d+\s+\d+\.\d+", line)
-                        if match:
-                            subject = match.group(1).strip()
-                            avg_school_match = re.search(r"(\d+\.\d+)\s+(\d+\.\d+)", line)
-                            if avg_school_match:
-                                avg_school = float(avg_school_match.group(1))
-                                avg_world = float(avg_school_match.group(2))
-                                subject_data.append({
-                                    "Subject": subject,
-                                    "Avg School": avg_school,
-                                    "Avg World": avg_world
-                                })
-                return pd.DataFrame(subject_data)
-
-            df_parsed = extract_subject_data(uploaded_pdf)
-
+            df_parsed = extract_subject_table(uploaded_pdf)
             if not df_parsed.empty:
                 year = int(year_input)
                 st.session_state.uploaded_subject_data[year] = df_parsed
