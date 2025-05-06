@@ -834,71 +834,79 @@ with tab2:
 
 
     elif selected_trend == "📤 Compare School vs World Averages (Upload PDFs)":
-        import pdfplumber
-        import re
+        st.markdown("### 📤 Compare School vs World Averages (Upload PDFs)")
 
-        st.markdown("### 📤 Upload and Compare School vs World Averages by Group")
+        # Initialize store in session state
+        if "uploaded_subject_data" not in st.session_state:
+            st.session_state.uploaded_subject_data = {}
 
-        if "world_avg_data" not in st.session_state:
-            st.session_state.world_avg_data = {}
-
-        year_input = st.text_input("Year of the Uploaded PDF")
-        uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type=["pdf"])
-
-        def extract_avg_grades_from_pdf(pdf_file):
-            results = []
-            current_group = None
-            with pdfplumber.open(pdf_file) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    lines = text.split('\n')
-                    for line in lines:
-                        group_match = re.match(r"Subject Group (\d)", line)
-                        if group_match:
-                            current_group = int(group_match.group(1))
-                            continue
-                        match = re.search(r'(.+?)\s+[\d\sPN]+\s+([\d.]+)\s+([\d.]+)\s+\d+\s+\d+$', line)
-                        if match and current_group:
-                            subject = match.group(1).strip()
-                            school_avg = float(match.group(2))
-                            world_avg = float(match.group(3))
-                            results.append({
-                                "Group": current_group,
-                                "Subject": subject,
-                                "School Avg": school_avg,
-                                "World Avg": world_avg
-                            })
-            return pd.DataFrame(results)
+        year_input = st.text_input("Year of the Uploaded PDF", value="2024")
+        uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type="pdf")
 
         if uploaded_pdf and year_input:
-            try:
-                data = extract_avg_grades_from_pdf(uploaded_pdf)
-                if not data.empty:
-                    st.session_state.world_avg_data[year_input] = data
-                    st.success(f"✅ Extracted data for year {year_input}.")
-                else:
-                    st.warning("⚠️ No valid data extracted from PDF.")
-            except Exception as e:
-                st.error(f"❌ Error processing PDF: {e}")
+            import fitz  # PyMuPDF
+            import re
 
-        if st.session_state.world_avg_data:
-            years_available = sorted(st.session_state.world_avg_data.keys(), reverse=True)
-            selected_comparison_year = st.selectbox("Select Year for Comparison", years_available)
-            df_compare = st.session_state.world_avg_data[selected_comparison_year]
+            def extract_subject_data(pdf_bytes):
+                doc = fitz.open(stream=pdf_bytes.read(), filetype="pdf")
+                subject_data = []
+                for page in doc:
+                    text = page.get_text()
+                    lines = text.split("\n")
+                    for i, line in enumerate(lines):
+                        match = re.match(r"^(.+?)\s+(\d+)\s+((?:\d+\s+){7})\d+\.\d+\s+\d+\.\d+", line)
+                        if match:
+                            subject = match.group(1).strip()
+                            avg_school_match = re.search(r"(\d+\.\d+)\s+(\d+\.\d+)", line)
+                            if avg_school_match:
+                                avg_school = float(avg_school_match.group(1))
+                                avg_world = float(avg_school_match.group(2))
+                                subject_data.append({
+                                    "Subject": subject,
+                                    "Avg School": avg_school,
+                                    "Avg World": avg_world
+                                })
+                return pd.DataFrame(subject_data)
 
-            available_groups = sorted(df_compare["Group"].unique())
-            selected_group = st.selectbox("Select IB Group", available_groups, format_func=lambda g: f"{g} - Group")
+            df_parsed = extract_subject_data(uploaded_pdf)
 
-            group_df = df_compare[df_compare["Group"] == selected_group].sort_values("Subject")
+            if not df_parsed.empty:
+                year = int(year_input)
+                st.session_state.uploaded_subject_data[year] = df_parsed
+                st.success(f"✅ Data for {year} uploaded successfully.")
+            else:
+                st.warning("⚠️ No valid data extracted from PDF.")
 
-            st.markdown(f"#### 📊 Group {selected_group} — School vs World Average ({selected_comparison_year})")
-            fig, ax = plt.subplots(figsize=(10, 5))
-            x = range(len(group_df))
-            ax.bar(x, group_df["School Avg"], width=0.4, label="School", align="center")
-            ax.bar([i + 0.4 for i in x], group_df["World Avg"], width=0.4, label="World", align="center")
-            ax.set_xticks([i + 0.2 for i in x])
-            ax.set_xticklabels(group_df["Subject"], rotation=90)
-            ax.set_ylabel("Average Grade")
-            ax.set_title(f"School vs World Averages – Group {selected_group} – {selected_comparison_year}")
-            ax.legend()
-            st.pyplot(fig)
+        if st.session_state.uploaded_subject_data:
+            selected_year = st.selectbox("Select Year", sorted(st.session_state.uploaded_subject_data.keys()), index=0)
+            group_map = {
+                1: "Studies in Language and Literature",
+                2: "Language Acquisition",
+                3: "Individuals and Societies",
+                4: "Sciences",
+                5: "Mathematics",
+                6: "The Arts"
+            }
+            selected_group = st.selectbox("Select IB Group", options=group_map.keys(), format_func=lambda g: f"{g} - {group_map[g]}")
+
+            # Show chart only for matching subjects
+            df = st.session_state.uploaded_subject_data[selected_year]
+            group_subjects = [k for k, v in group_mapping.items() if v == selected_group]
+            filtered = df[df["Subject"].isin(group_subjects)]
+
+            if not filtered.empty:
+                st.markdown(f"#### 📊 School vs World Averages for Group {selected_group} - {group_map[selected_group]} ({selected_year})")
+                fig, ax = plt.subplots(figsize=(10, 4))
+                bar_width = 0.4
+                index = range(len(filtered))
+                ax.bar(index, filtered["Avg School"], width=bar_width, label="School")
+                ax.bar([i + bar_width for i in index], filtered["Avg World"], width=bar_width, label="World")
+                ax.set_xticks([i + bar_width / 2 for i in index])
+                ax.set_xticklabels(filtered["Subject"], rotation=90)
+                ax.set_ylabel("Average Grade")
+                ax.set_ylim(0, 7)
+                ax.set_title("School vs World Averages by Subject")
+                ax.legend()
+                st.pyplot(fig)
+            else:
+                st.warning("No subjects found for the selected group.")
