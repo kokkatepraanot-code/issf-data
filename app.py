@@ -837,6 +837,7 @@ with tab2:
         st.markdown("### 📤 Compare School vs World Averages (Upload PDFs)")
 
         import pdfplumber
+        import re
 
         # Persistent store in session
         if "uploaded_subject_data" not in st.session_state:
@@ -849,18 +850,21 @@ with tab2:
             subject_data = []
             with pdfplumber.open(pdf_file) as pdf:
                 for page in pdf.pages:
-                    table = page.extract_table()
-                    if table:
-                        for row in table:
-                            if len(row) >= 11:
-                                subject = row[0]
-                                school_avg = row[-4]
-                                world_avg = row[-3]
+                    text = page.extract_text()
+                    if text:
+                        lines = text.split("\n")
+                        for line in lines:
+                            # Check if it has both school & world averages
+                            match = re.search(r'(.+?)\s+(\d+)\s+([\d\s]+)\s+(\d\.\d{2})\s+(\d\.\d{2})\s+\d\s+\d', line)
+                            if match:
+                                subject = match.group(1).strip()
                                 try:
+                                    school_avg = float(match.group(4))
+                                    world_avg = float(match.group(5))
                                     subject_data.append({
-                                        "Subject": subject.strip(),
-                                        "Avg School": float(school_avg),
-                                        "Avg World": float(world_avg)
+                                        "Subject": subject,
+                                        "Avg School": school_avg,
+                                        "Avg World": world_avg
                                     })
                                 except:
                                     continue
