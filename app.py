@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import streamlit as st
 import seaborn as sns
 from io import BytesIO
+import fitz  # PyMuPDF
 
 # === Simple Login Credentials ===
 USER_CREDENTIALS = {
@@ -43,7 +44,7 @@ st.markdown("""
 
 # Add logo and title
 st.sidebar.image("logo.png", width=250)
-st.sidebar.markdown("### The International School of San Francisco")
+st.sidebar.markdown("### The International School of San Franciscos")
 st.sidebar.markdown("---")
 st.markdown("### IB Diploma Programme - Performance Dashboard")
 st.markdown("---")
@@ -831,7 +832,7 @@ with tab2:
         st.pyplot(fig)
 
         # === IB World Average Comparison Upload and Visualization ===
-        import fitz  # PyMuPDF
+        
 
         st.markdown("---")
         st.markdown("### 📄 Upload IB World Averages PDF")
