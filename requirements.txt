@@ -6,5 +6,4 @@ numpy
 scikit-learn
 plotly
 pdfplumber==0.10.2
-PyMuPDF
 
