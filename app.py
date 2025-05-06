@@ -44,7 +44,7 @@ st.markdown("""
 
 # Add logo and title
 st.sidebar.image("logo.png", width=250)
-st.sidebar.markdown("### The International School of San Francisco")
+st.sidebar.markdown("### The International School of San Franciscos")
 st.sidebar.markdown("---")
 st.markdown("### IB Diploma Programme - Performance Dashboard")
 st.markdown("---")
