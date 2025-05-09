@@ -888,7 +888,8 @@ with tab2:
                     if text:
                         lines = text.split("\n")
                         for line in lines:
-                            match = re.search(r'(.+?)\s+(\d+)\s+([\d\s]+)\s+(\d\.\d{2})\s+(\d\.\d{2})\s+\d\s+\d', line)
+                            # Relaxed regex to tolerate layout changes
+                            match = re.search(r'(.+?)\s+(\d+)\s+.*?(\d\.\d{2})\s+(\d\.\d{2})', line)
                             if match:
                                 raw_subject = match.group(1).strip()
                                 norm_subject = normalize(raw_subject)
@@ -899,10 +900,12 @@ with tab2:
                                     subject_data.append({
                                         "Subject": matched,
                                         "Base": base_subject,
-                                        "Avg School": float(match.group(4)),
-                                        "Avg World": float(match.group(5))
+                                        "Avg School": float(match.group(3)),
+                                        "Avg World": float(match.group(4))
                                     })
             return pd.DataFrame(subject_data)
+
+            
 
         if uploaded_pdf and year_input:
             df_parsed = extract_subject_table(uploaded_pdf)
