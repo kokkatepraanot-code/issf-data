@@ -840,6 +840,19 @@ with tab2:
         import re
         import numpy as np
 
+        # Normalize a subject string consistently
+        def normalize_subject_name(name):
+            name = name.upper()
+            name = re.sub(r"\(P\d{2}\)", "", name)  # remove things like (P22)
+            name = name.replace("LIT AND LANG", "LANGUAGE AND LITERATURE")
+            name = name.replace("LANG AND LIT", "LANGUAGE AND LITERATURE")
+            name = name.replace("LIT", "LITERATURE")
+            name = name.replace("LANG", "LANGUAGE")
+            name = name.replace("&", "AND")
+            name = re.sub(r"[^A-Z0-9 ]", "", name)  # remove special chars
+            name = re.sub(r"\s+", " ", name).strip()  # collapse whitespace
+            return name
+
         if "uploaded_subject_data" not in st.session_state:
             st.session_state.uploaded_subject_data = {}
 
@@ -855,6 +868,13 @@ with tab2:
         year_input = st.text_input("Year of the Uploaded PDF", value="2024")
         uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type="pdf")
 
+        # Load clean subject names from your CSV
+        clean_subjects_df = pd.read_csv("student_points_df.csv")
+        clean_subjects = clean_subjects_df["Subject"].dropna().unique()
+        clean_subject_map = {
+            normalize_subject_name(s): s for s in clean_subjects
+        }
+
         def extract_subject_table(pdf_file):
             subject_data = []
             with pdfplumber.open(pdf_file) as pdf:
@@ -865,14 +885,14 @@ with tab2:
                         for line in lines:
                             match = re.search(r'(.+?)\s+(\d+)\s+([\d\s]+)\s+(\d\.\d{2})\s+(\d\.\d{2})\s+\d\s+\d', line)
                             if match:
-                                subject_raw = match.group(1).strip().upper()
-                                school_avg = float(match.group(4))
-                                world_avg = float(match.group(5))
-                                subject_data.append({
-                                    "Subject": subject_raw,
-                                    "Avg School": school_avg,
-                                    "Avg World": world_avg
-                                })
+                                raw_subject = match.group(1).strip()
+                                norm_subject = normalize_subject_name(raw_subject)
+                                if norm_subject in clean_subject_map:
+                                    subject_data.append({
+                                        "Subject": clean_subject_map[norm_subject],
+                                        "Avg School": float(match.group(4)),
+                                        "Avg World": float(match.group(5))
+                                    })
             return pd.DataFrame(subject_data)
 
         if uploaded_pdf and year_input:
@@ -894,15 +914,9 @@ with tab2:
 
             df_uploaded = st.session_state.uploaded_subject_data[selected_year]
 
-            # Normalize uploaded subjects
-            df_uploaded["Subject"] = df_uploaded["Subject"].str.upper().str.strip()
-
             # Filter group subjects
             group_subjects = [subj for subj, grp in group_mapping.items() if grp == selected_group]
-            group_subjects_clean = [s.upper().strip() for s in group_subjects]
-
-            # Filter uploaded data
-            filtered = df_uploaded[df_uploaded["Subject"].isin(group_subjects_clean)]
+            filtered = df_uploaded[df_uploaded["Subject"].isin(group_subjects)]
 
             if not filtered.empty:
                 st.markdown(f"#### 📊 School vs World Averages for Group {selected_group} - {group_map[selected_group]} ({selected_year})")
@@ -922,9 +936,8 @@ with tab2:
                 ax.legend()
                 st.pyplot(fig)
 
-                # === Table section ===
+                # Table
                 st.markdown("### 📊 School vs World Average Comparison Table")
-
                 filtered["Grade Gap"] = np.round(filtered["Avg School"] - filtered["Avg World"], 2)
                 filtered_sorted = filtered.sort_values(by="Grade Gap", ascending=False)
 
