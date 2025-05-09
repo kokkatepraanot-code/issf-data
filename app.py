@@ -838,6 +838,7 @@ with tab2:
 
         import pdfplumber
         import re
+        import numpy as np
 
         if "uploaded_subject_data" not in st.session_state:
             st.session_state.uploaded_subject_data = {}
@@ -920,5 +921,19 @@ with tab2:
                 ax.set_title("School vs World Averages by Subject")
                 ax.legend()
                 st.pyplot(fig)
+
+                # === Table section ===
+                st.markdown("### 📊 School vs World Average Comparison Table")
+
+                filtered["Grade Gap"] = np.round(filtered["Avg School"] - filtered["Avg World"], 2)
+                filtered_sorted = filtered.sort_values(by="Grade Gap", ascending=False)
+
+                st.dataframe(filtered_sorted.reset_index(drop=True).style.format({
+                    "Avg School": "{:.2f}",
+                    "Avg World": "{:.2f}",
+                    "Grade Gap": "{:+.2f}"
+                }).highlight_max(axis=0, subset=["Avg School", "Avg World"], color='lightgreen')
+                  .highlight_min(axis=0, subset=["Avg School", "Avg World"], color='salmon'),
+                  use_container_width=True)
             else:
                 st.warning("❌ No subjects from this group found in uploaded PDF.")
