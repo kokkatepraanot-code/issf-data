@@ -841,8 +841,8 @@ with tab2:
         import numpy as np
         from difflib import get_close_matches
 
-        # === Subject Normalization Helper ===
-        def normalize_subject_name(name):
+        # === Normalization helper ===
+        def normalize(name):
             name = name.upper().strip()
             name = re.sub(r"\(P\d{2}\)", "", name)
             name = name.replace("&", "AND")
@@ -850,13 +850,24 @@ with tab2:
             name = re.sub(r"\s+", " ", name)
             return name
 
-        # === Load full subject names from CSV ===
-        clean_subjects_df = pd.read_csv("student_points_df.csv")
-        csv_subjects = clean_subjects_df["Subject"].dropna().unique()
-        subject_lookup = {normalize_subject_name(s): s for s in csv_subjects}
-        subject_list_for_matching = list(subject_lookup.keys())
+        # === Load and process CSV master subject list ===
+        csv_df = pd.read_csv("student_points_df.csv")
+        csv_df["Canonical Subject"] = (
+            csv_df["Subject"].astype(str).str.strip() + " " +
+            csv_df["Level"].astype(str).str.strip() + " " +
+            csv_df["Language"].astype(str).str.strip()
+        )
+        canonical_lookup = {
+            normalize(s): s for s in csv_df["Canonical Subject"].unique()
+        }
 
-        # === IB Group Mapping (based on simplified base names) ===
+        subject_to_group = {}
+        for subj, group in group_mapping.items():
+            subject_to_group[normalize(subj)] = group
+
+        if "uploaded_subject_data" not in st.session_state:
+            st.session_state.uploaded_subject_data = {}
+
         group_map = {
             1: "Studies in Language and Literature",
             2: "Language Acquisition",
@@ -865,18 +876,6 @@ with tab2:
             5: "Mathematics",
             6: "The Arts"
         }
-
-        group_subjects_base = {
-            1: ["ENGLISH A", "SPANISH A", "FRENCH A", "CHINESE A", "GERMAN A", "ITALIAN A", "DUTCH A", "NORWEGIAN A", "PORTUGUESE A", "VIETNAMESE A"],
-            2: ["FRENCH B", "SPANISH B", "GERMAN B", "ITALIAN B", "ENGLISH B", "CHINESE B", "ARABIC B", "FRENCH AB", "SPANISH AB", "ARABIC AB", "MANDARIN AB"],
-            3: ["ECONOMICS", "BUSINESS", "HISTORY", "GEOGRAPHY", "PSYCHOLOGY", "PHILOSOPHY", "GLOB", "INFORMATION TECHNOLOGY"],
-            4: ["BIOLOGY", "CHEMISTRY", "PHYSICS", "ENVIRONMENTAL", "DESIGN TECH", "COMPUTER SC"],
-            5: ["MATH", "MATHEMATICS"],
-            6: ["VISUAL ARTS", "THEATRE", "MUSIC", "FILM"]
-        }
-
-        if "uploaded_subject_data" not in st.session_state:
-            st.session_state.uploaded_subject_data = {}
 
         year_input = st.text_input("Year of the Uploaded PDF", value="2024")
         uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type="pdf")
@@ -892,15 +891,16 @@ with tab2:
                             match = re.search(r'(.+?)\s+(\d+)\s+([\d\s]+)\s+(\d\.\d{2})\s+(\d\.\d{2})\s+\d\s+\d', line)
                             if match:
                                 raw_subject = match.group(1).strip()
-                                norm_subject = normalize_subject_name(raw_subject)
-                                closest = get_close_matches(norm_subject, subject_list_for_matching, n=1, cutoff=0.85)
+                                norm_subject = normalize(raw_subject)
+                                closest = get_close_matches(norm_subject, list(canonical_lookup.keys()), n=1, cutoff=0.85)
                                 if closest:
-                                    matched_subject = subject_lookup[closest[0]]
+                                    matched = canonical_lookup[closest[0]]
+                                    base_subject = normalize(" ".join(matched.split()[:-2]))  # drop HL/SL and Language
                                     subject_data.append({
-                                        "Subject": matched_subject,
+                                        "Subject": matched,
+                                        "Base": base_subject,
                                         "Avg School": float(match.group(4)),
-                                        "Avg World": float(match.group(5)),
-                                        "Norm Subject": norm_subject
+                                        "Avg World": float(match.group(5))
                                     })
             return pd.DataFrame(subject_data)
 
@@ -923,20 +923,16 @@ with tab2:
 
             df_uploaded = st.session_state.uploaded_subject_data[selected_year]
 
-            # Filter subjects by fuzzy matching base subject names from group_subjects_base
-            base_subjects = group_subjects_base[selected_group]
-            base_subjects_clean = [normalize_subject_name(s) for s in base_subjects]
+            # Filter subjects belonging to selected group
+            group_subjects = [subj for subj, grp in group_mapping.items() if grp == selected_group]
+            group_subjects_norm = [normalize(s) for s in group_subjects]
 
-            def belongs_to_group(norm_subject):
-                return any(base in norm_subject for base in base_subjects_clean)
-
-            df_uploaded["Norm Subject"] = df_uploaded["Subject"].apply(normalize_subject_name)
-            filtered = df_uploaded[df_uploaded["Norm Subject"].apply(belongs_to_group)]
+            filtered = df_uploaded[df_uploaded["Base"].isin(group_subjects_norm)]
 
             if not filtered.empty:
                 st.markdown(f"#### 📊 School vs World Averages for Group {selected_group} - {group_map[selected_group]} ({selected_year})")
-
                 fig, ax = plt.subplots(figsize=(10, 4))
+
                 bar_width = 0.4
                 index = range(len(filtered))
 
