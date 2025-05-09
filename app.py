@@ -839,23 +839,24 @@ with tab2:
         import pdfplumber
         import re
         import numpy as np
+        from difflib import get_close_matches
 
-        # Normalize a subject string consistently
+        # === Subject Normalization Helper ===
         def normalize_subject_name(name):
-            name = name.upper()
-            name = re.sub(r"\(P\d{2}\)", "", name)  # remove things like (P22)
-            name = name.replace("LIT AND LANG", "LANGUAGE AND LITERATURE")
-            name = name.replace("LANG AND LIT", "LANGUAGE AND LITERATURE")
-            name = name.replace("LIT", "LITERATURE")
-            name = name.replace("LANG", "LANGUAGE")
+            name = name.upper().strip()
+            name = re.sub(r"\(P\d{2}\)", "", name)
             name = name.replace("&", "AND")
-            name = re.sub(r"[^A-Z0-9 ]", "", name)  # remove special chars
-            name = re.sub(r"\s+", " ", name).strip()  # collapse whitespace
+            name = re.sub(r"[^A-Z0-9 ]", "", name)
+            name = re.sub(r"\s+", " ", name)
             return name
 
-        if "uploaded_subject_data" not in st.session_state:
-            st.session_state.uploaded_subject_data = {}
+        # === Load full subject names from CSV ===
+        clean_subjects_df = pd.read_csv("student_points_df.csv")
+        csv_subjects = clean_subjects_df["Subject"].dropna().unique()
+        subject_lookup = {normalize_subject_name(s): s for s in csv_subjects}
+        subject_list_for_matching = list(subject_lookup.keys())
 
+        # === IB Group Mapping (based on simplified base names) ===
         group_map = {
             1: "Studies in Language and Literature",
             2: "Language Acquisition",
@@ -865,15 +866,20 @@ with tab2:
             6: "The Arts"
         }
 
+        group_subjects_base = {
+            1: ["ENGLISH A", "SPANISH A", "FRENCH A", "CHINESE A", "GERMAN A", "ITALIAN A", "DUTCH A", "NORWEGIAN A", "PORTUGUESE A", "VIETNAMESE A"],
+            2: ["FRENCH B", "SPANISH B", "GERMAN B", "ITALIAN B", "ENGLISH B", "CHINESE B", "ARABIC B", "FRENCH AB", "SPANISH AB", "ARABIC AB", "MANDARIN AB"],
+            3: ["ECONOMICS", "BUSINESS", "HISTORY", "GEOGRAPHY", "PSYCHOLOGY", "PHILOSOPHY", "GLOB", "INFORMATION TECHNOLOGY"],
+            4: ["BIOLOGY", "CHEMISTRY", "PHYSICS", "ENVIRONMENTAL", "DESIGN TECH", "COMPUTER SC"],
+            5: ["MATH", "MATHEMATICS"],
+            6: ["VISUAL ARTS", "THEATRE", "MUSIC", "FILM"]
+        }
+
+        if "uploaded_subject_data" not in st.session_state:
+            st.session_state.uploaded_subject_data = {}
+
         year_input = st.text_input("Year of the Uploaded PDF", value="2024")
         uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type="pdf")
-
-        # Load clean subject names from your CSV
-        clean_subjects_df = pd.read_csv("student_points_df.csv")
-        clean_subjects = clean_subjects_df["Subject"].dropna().unique()
-        clean_subject_map = {
-            normalize_subject_name(s): s for s in clean_subjects
-        }
 
         def extract_subject_table(pdf_file):
             subject_data = []
@@ -887,11 +893,14 @@ with tab2:
                             if match:
                                 raw_subject = match.group(1).strip()
                                 norm_subject = normalize_subject_name(raw_subject)
-                                if norm_subject in clean_subject_map:
+                                closest = get_close_matches(norm_subject, subject_list_for_matching, n=1, cutoff=0.85)
+                                if closest:
+                                    matched_subject = subject_lookup[closest[0]]
                                     subject_data.append({
-                                        "Subject": clean_subject_map[norm_subject],
+                                        "Subject": matched_subject,
                                         "Avg School": float(match.group(4)),
-                                        "Avg World": float(match.group(5))
+                                        "Avg World": float(match.group(5)),
+                                        "Norm Subject": norm_subject
                                     })
             return pd.DataFrame(subject_data)
 
@@ -914,14 +923,20 @@ with tab2:
 
             df_uploaded = st.session_state.uploaded_subject_data[selected_year]
 
-            # Filter group subjects
-            group_subjects = [subj for subj, grp in group_mapping.items() if grp == selected_group]
-            filtered = df_uploaded[df_uploaded["Subject"].isin(group_subjects)]
+            # Filter subjects by fuzzy matching base subject names from group_subjects_base
+            base_subjects = group_subjects_base[selected_group]
+            base_subjects_clean = [normalize_subject_name(s) for s in base_subjects]
+
+            def belongs_to_group(norm_subject):
+                return any(base in norm_subject for base in base_subjects_clean)
+
+            df_uploaded["Norm Subject"] = df_uploaded["Subject"].apply(normalize_subject_name)
+            filtered = df_uploaded[df_uploaded["Norm Subject"].apply(belongs_to_group)]
 
             if not filtered.empty:
                 st.markdown(f"#### 📊 School vs World Averages for Group {selected_group} - {group_map[selected_group]} ({selected_year})")
-                fig, ax = plt.subplots(figsize=(10, 4))
 
+                fig, ax = plt.subplots(figsize=(10, 4))
                 bar_width = 0.4
                 index = range(len(filtered))
 
@@ -936,12 +951,12 @@ with tab2:
                 ax.legend()
                 st.pyplot(fig)
 
-                # Table
+                # 📊 Table Comparison
                 st.markdown("### 📊 School vs World Average Comparison Table")
                 filtered["Grade Gap"] = np.round(filtered["Avg School"] - filtered["Avg World"], 2)
                 filtered_sorted = filtered.sort_values(by="Grade Gap", ascending=False)
 
-                st.dataframe(filtered_sorted.reset_index(drop=True).style.format({
+                st.dataframe(filtered_sorted[["Subject", "Avg School", "Avg World", "Grade Gap"]].reset_index(drop=True).style.format({
                     "Avg School": "{:.2f}",
                     "Avg World": "{:.2f}",
                     "Grade Gap": "{:+.2f}"
