@@ -839,9 +839,17 @@ with tab2:
         import pdfplumber
         import re
 
-        # Persistent store in session
         if "uploaded_subject_data" not in st.session_state:
             st.session_state.uploaded_subject_data = {}
+
+        group_map = {
+            1: "Studies in Language and Literature",
+            2: "Language Acquisition",
+            3: "Individuals and Societies",
+            4: "Sciences",
+            5: "Mathematics",
+            6: "The Arts"
+        }
 
         year_input = st.text_input("Year of the Uploaded PDF", value="2024")
         uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type="pdf")
@@ -854,20 +862,16 @@ with tab2:
                     if text:
                         lines = text.split("\n")
                         for line in lines:
-                            # Check if it has both school & world averages
                             match = re.search(r'(.+?)\s+(\d+)\s+([\d\s]+)\s+(\d\.\d{2})\s+(\d\.\d{2})\s+\d\s+\d', line)
                             if match:
-                                subject = match.group(1).strip()
-                                try:
-                                    school_avg = float(match.group(4))
-                                    world_avg = float(match.group(5))
-                                    subject_data.append({
-                                        "Subject": subject,
-                                        "Avg School": school_avg,
-                                        "Avg World": world_avg
-                                    })
-                                except:
-                                    continue
+                                subject_raw = match.group(1).strip().upper()
+                                school_avg = float(match.group(4))
+                                world_avg = float(match.group(5))
+                                subject_data.append({
+                                    "Subject": subject_raw,
+                                    "Avg School": school_avg,
+                                    "Avg World": world_avg
+                                })
             return pd.DataFrame(subject_data)
 
         if uploaded_pdf and year_input:
@@ -881,28 +885,34 @@ with tab2:
 
         if st.session_state.uploaded_subject_data:
             selected_year = st.selectbox("Select Year", sorted(st.session_state.uploaded_subject_data.keys()), index=0)
-            group_map = {
-                1: "Studies in Language and Literature",
-                2: "Language Acquisition",
-                3: "Individuals and Societies",
-                4: "Sciences",
-                5: "Mathematics",
-                6: "The Arts"
-            }
-            selected_group = st.selectbox("Select IB Group", options=group_map.keys(), format_func=lambda g: f"{g} - {group_map[g]}")
+            selected_group = st.selectbox(
+                "Select IB Group",
+                options=group_map.keys(),
+                format_func=lambda g: f"{g} - {group_map[g]}"
+            )
 
-            # Show chart only for matching subjects
-            df = st.session_state.uploaded_subject_data[selected_year]
-            group_subjects = [k for k, v in group_mapping.items() if v == selected_group]
-            filtered = df[df["Subject"].isin(group_subjects)]
+            df_uploaded = st.session_state.uploaded_subject_data[selected_year]
+
+            # Normalize uploaded subjects
+            df_uploaded["Subject"] = df_uploaded["Subject"].str.upper().str.strip()
+
+            # Filter group subjects
+            group_subjects = [subj for subj, grp in group_mapping.items() if grp == selected_group]
+            group_subjects_clean = [s.upper().strip() for s in group_subjects]
+
+            # Filter uploaded data
+            filtered = df_uploaded[df_uploaded["Subject"].isin(group_subjects_clean)]
 
             if not filtered.empty:
                 st.markdown(f"#### 📊 School vs World Averages for Group {selected_group} - {group_map[selected_group]} ({selected_year})")
                 fig, ax = plt.subplots(figsize=(10, 4))
+
                 bar_width = 0.4
                 index = range(len(filtered))
+
                 ax.bar(index, filtered["Avg School"], width=bar_width, label="School")
                 ax.bar([i + bar_width for i in index], filtered["Avg World"], width=bar_width, label="World")
+
                 ax.set_xticks([i + bar_width / 2 for i in index])
                 ax.set_xticklabels(filtered["Subject"], rotation=90)
                 ax.set_ylabel("Average Grade")
@@ -911,4 +921,4 @@ with tab2:
                 ax.legend()
                 st.pyplot(fig)
             else:
-                st.warning("No subjects found for the selected group.")
+                st.warning("❌ No subjects from this group found in uploaded PDF.")
