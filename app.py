@@ -876,30 +876,40 @@ with tab2:
         year_input = st.text_input("Year of the Uploaded PDF", value="2024")
         uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type="pdf")
 
-        def extract_subject_data_regex(uploaded_file):
-            import fitz
-            doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-            all_text = "\n".join([page.get_text() for page in doc])
-            doc.close()
-
-            pattern = re.compile(r"(.+?)\s+(\d+)\s+[\d\s]+(\d\.\d{2})\s+(\d\.\d{2})")
+        def extract_subject_table(pdf_file):
             subject_data = []
+            with pdfplumber.open(pdf_file) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        lines = text.split("\n")
+                        for line in lines:
+                            # Target lines with average school and world grades near the end
+                            parts = re.split(r'\s{2,}', line.strip())
+                            if len(parts) >= 4:
+                                subject_part = parts[0]
+                                school_avg_match = re.search(r'(\d\.\d{2})', line)
+                                all_floats = re.findall(r'(\d\.\d{2})', line)
 
-            for match in pattern.finditer(all_text):
-                raw_subject = match.group(1).strip()
-                norm_subject = normalize(raw_subject)
-                closest = get_close_matches(norm_subject, list(canonical_lookup.keys()), n=1, cutoff=0.85)
-                if closest:
-                    matched = canonical_lookup[closest[0]]
-                    base_subject = normalize(" ".join(matched.split()[:-2]))  # drop HL/SL and Language
-                    subject_data.append({
-                        "Subject": matched,
-                        "Base": base_subject,
-                        "Avg School": float(match.group(3)),
-                        "Avg World": float(match.group(4))
-                    })
+                                if school_avg_match and len(all_floats) >= 2:
+                                    raw_subject = subject_part
+                                    avg_school = float(all_floats[-2])
+                                    avg_world = float(all_floats[-1])
+
+                                    norm_subject = normalize(raw_subject)
+                                    closest = get_close_matches(norm_subject, list(canonical_lookup.keys()), n=1, cutoff=0.85)
+                                    if closest:
+                                        matched = canonical_lookup[closest[0]]
+                                        base_subject = normalize(" ".join(matched.split()[:-2]))  # drop HL/SL + Language
+                                        subject_data.append({
+                                            "Subject": matched,
+                                            "Base": base_subject,
+                                            "Avg School": avg_school,
+                                            "Avg World": avg_world
+                                        })
 
             return pd.DataFrame(subject_data)
+
 
         if uploaded_pdf and year_input:
             df_parsed = extract_subject_data_regex(uploaded_pdf)
