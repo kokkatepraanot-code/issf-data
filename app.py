@@ -832,51 +832,22 @@ with tab2:
         ax.grid(True)
         st.pyplot(fig)
 
-
     elif selected_trend == "📤 Compare School vs World Averages (Upload PDFs)":
         st.markdown("### 📤 Compare School vs World Averages (Upload PDFs)")
 
         import pdfplumber
-        import re
         import numpy as np
+        import re
         from difflib import get_close_matches
 
-            
-        def extract_subject_data_regex(pdf_file):
-            import pdfplumber
-            import re
-            from difflib import get_close_matches
+        # === CSV & Lookup setup ===
+        csv_df = pd.read_csv("student_points_df.csv")
+        csv_df["Canonical Subject"] = (
+            csv_df["Subject"].astype(str).str.strip() + " " +
+            csv_df["Level"].astype(str).str.strip() + " " +
+            csv_df["Language"].astype(str).str.strip()
+        )
 
-            data = []
-            with pdfplumber.open(pdf_file) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if not text:
-                        continue
-                    lines = text.split("\n")
-                    for line in lines:
-                        print("LINE:", line)
-                        match = re.search(r'(.+?)\s+(\d+)\s+(?:\d+\s+){6,}\d+\.\d{2}\s+(\d\.\d{2})\s+(\d\.\d{2})', line)
-                        if match:
-                            raw_subject = match.group(1).strip()
-                            norm_subject = normalize(raw_subject)
-                            closest = get_close_matches(norm_subject, list(canonical_lookup.keys()), n=1, cutoff=0.85)
-                            if closest:
-                                matched = canonical_lookup[closest[0]]
-                                tokens = matched.split()
-                                level = tokens[-2]
-                                lang = tokens[-1]
-                                base_name = " ".join(tokens[:-2])
-                                data.append({
-                                    "Display Name": f"{level} {lang} - {base_name}",
-                                    "Group": subject_to_group.get(normalize(base_name), None),
-                                    "Avg School": float(match.group(3)),
-                                    "Avg World": float(match.group(4))
-                                })
-            return pd.DataFrame(data)
-
-
-    # === Normalization helper ===
         def normalize(name):
             name = name.upper().strip()
             name = re.sub(r"\(P\d{2}\)", "", name)
@@ -885,21 +856,50 @@ with tab2:
             name = re.sub(r"\s+", " ", name)
             return name
 
-        # === Load and process CSV master subject list ===
-        csv_df = pd.read_csv("student_points_df.csv")
-        csv_df["Canonical Subject"] = (
-            csv_df["Subject"].astype(str).str.strip() + " " +
-            csv_df["Level"].astype(str).str.strip() + " " +
-            csv_df["Language"].astype(str).str.strip()
-        )
         canonical_lookup = {
             normalize(s): s for s in csv_df["Canonical Subject"].unique()
         }
 
-        subject_to_group = {}
-        for subj, group in group_mapping.items():
-            subject_to_group[normalize(subj)] = group
+        subject_to_group = {normalize(k): v for k, v in group_mapping.items()}
 
+        # === Main extractor ===
+        def extract_subject_data_from_pdf(pdf_file):
+            data = []
+            with pdfplumber.open(pdf_file) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if not text:
+                        continue
+                    lines = text.split("\n")
+                    for line in lines:
+                        match = re.search(r'(.+?)\s+(\d\.\d{2})\s+(\d\.\d{2})$', line)
+                        if match:
+                            raw_subject = match.group(1).strip()
+                            school_avg = float(match.group(2))
+                            world_avg = float(match.group(3))
+
+                            norm_subject = normalize(raw_subject)
+                            closest = get_close_matches(norm_subject, canonical_lookup.keys(), n=1, cutoff=0.85)
+
+                            if closest:
+                                matched = canonical_lookup[closest[0]]
+                                tokens = matched.split()
+                                level = tokens[-2]
+                                lang = tokens[-1]
+                                base_name = " ".join(tokens[:-2])
+                                base_norm = normalize(base_name)
+                                group = subject_to_group.get(base_norm, None)
+
+                                data.append({
+                                    "Display Name": f"{level} {lang} - {base_name}",
+                                    "Group": group,
+                                    "Avg School": school_avg,
+                                    "Avg World": world_avg
+                                })
+
+            return pd.DataFrame(data)
+
+        # === Streamlit UI ===
         if "uploaded_subject_data" not in st.session_state:
             st.session_state.uploaded_subject_data = {}
 
@@ -915,39 +915,11 @@ with tab2:
         year_input = st.text_input("Year of the Uploaded PDF", value="2024")
         uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type="pdf")
 
-        def extract_subject_table(pdf_file):
-            subject_data = []
-            with pdfplumber.open(pdf_file) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if text:
-                        lines = text.split("\n")
-                        for line in lines:
-                            # Relaxed regex to tolerate layout changes
-                            match = re.search(r'(.+?)\s+(\d+)\s+.*?(\d\.\d{2})\s+(\d\.\d{2})', line)
-                            if match:
-                                raw_subject = match.group(1).strip()
-                                norm_subject = normalize(raw_subject)
-                                closest = get_close_matches(norm_subject, list(canonical_lookup.keys()), n=1, cutoff=0.85)
-                                if closest:
-                                    matched = canonical_lookup[closest[0]]
-                                    base_subject = normalize(" ".join(matched.split()[:-2]))  # drop HL/SL and Language
-                                    subject_data.append({
-                                        "Subject": matched,
-                                        "Base": base_subject,
-                                        "Avg School": float(match.group(3)),
-                                        "Avg World": float(match.group(4))
-                                    })
-            return pd.DataFrame(subject_data)
-
-            
-
         if uploaded_pdf and year_input:
-            df_parsed = extract_subject_table(uploaded_pdf)
+            df_parsed = extract_subject_data_from_pdf(uploaded_pdf)
             if not df_parsed.empty:
-                year = int(year_input)
-                st.session_state.uploaded_subject_data[year] = df_parsed
-                st.success(f"✅ Data for {year} uploaded successfully.")
+                st.session_state.uploaded_subject_data[int(year_input)] = df_parsed
+                st.success(f"✅ Data for {year_input} uploaded successfully.")
             else:
                 st.warning("⚠️ No valid data extracted from PDF.")
 
@@ -961,11 +933,7 @@ with tab2:
 
             df_uploaded = st.session_state.uploaded_subject_data[selected_year]
 
-            # Filter subjects belonging to selected group
-            group_subjects = [subj for subj, grp in group_mapping.items() if grp == selected_group]
-            group_subjects_norm = [normalize(s) for s in group_subjects]
-
-            filtered = df_uploaded[df_uploaded["Base"].isin(group_subjects_norm)]
+            filtered = df_uploaded[df_uploaded["Group"] == selected_group]
 
             if not filtered.empty:
                 st.markdown(f"#### 📊 School vs World Averages for Group {selected_group} - {group_map[selected_group]} ({selected_year})")
@@ -978,26 +946,21 @@ with tab2:
                 ax.bar([i + bar_width for i in index], filtered["Avg World"], width=bar_width, label="World")
 
                 ax.set_xticks([i + bar_width / 2 for i in index])
-                ax.set_xticklabels(filtered["Subject"], rotation=90)
+                ax.set_xticklabels(filtered["Display Name"], rotation=90)
                 ax.set_ylabel("Average Grade")
                 ax.set_ylim(0, 7)
                 ax.set_title("School vs World Averages by Subject")
                 ax.legend()
                 st.pyplot(fig)
 
-                # 📊 Table Comparison
-                st.markdown("### 📊 School vs World Average Comparison Table")
+                st.markdown("### 📋 School vs World Average Comparison Table")
                 filtered["Grade Gap"] = np.round(filtered["Avg School"] - filtered["Avg World"], 2)
-                filtered_sorted = filtered.sort_values(by="Grade Gap", ascending=False)
-
-                st.dataframe(filtered_sorted[["Subject", "Avg School", "Avg World", "Grade Gap"]].reset_index(drop=True).style.format({
+                st.dataframe(filtered.sort_values("Grade Gap", ascending=False)[["Display Name", "Avg School", "Avg World", "Grade Gap"]].style.format({
                     "Avg School": "{:.2f}",
                     "Avg World": "{:.2f}",
                     "Grade Gap": "{:+.2f}"
                 }).highlight_max(axis=0, subset=["Avg School", "Avg World"], color='lightgreen')
-                    .highlight_min(axis=0, subset=["Avg School", "Avg World"], color='salmon'),
-                    use_container_width=True)
+                .highlight_min(axis=0, subset=["Avg School", "Avg World"], color='salmon'),
+                use_container_width=True)
             else:
                 st.warning("❌ No subjects from this group found in uploaded PDF.")
-
-
