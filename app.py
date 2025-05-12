@@ -836,12 +836,9 @@ with tab2:
     elif selected_trend == "📤 Compare School vs World Averages (Upload PDFs)":
         st.markdown("### 📤 Compare School vs World Averages (Upload PDFs)")
 
-        import pdfplumber
         import re
         import numpy as np
-        from difflib import get_close_matches
 
-        # === Normalization helper ===
         def normalize(name):
             name = name.upper().strip()
             name = re.sub(r"\(P\d{2}\)", "", name)
@@ -850,7 +847,6 @@ with tab2:
             name = re.sub(r"\s+", " ", name)
             return name
 
-        # === Load and process CSV master subject list ===
         csv_df = pd.read_csv("student_points_df.csv")
         csv_df["Canonical Subject"] = (
             csv_df["Subject"].astype(str).str.strip() + " " +
@@ -865,9 +861,6 @@ with tab2:
         for subj, group in group_mapping.items():
             subject_to_group[normalize(subj)] = group
 
-        if "uploaded_subject_data" not in st.session_state:
-            st.session_state.uploaded_subject_data = {}
-
         group_map = {
             1: "Studies in Language and Literature",
             2: "Language Acquisition",
@@ -877,90 +870,93 @@ with tab2:
             6: "The Arts"
         }
 
+        if "uploaded_subject_data" not in st.session_state:
+            st.session_state.uploaded_subject_data = {}
+
         year_input = st.text_input("Year of the Uploaded PDF", value="2024")
         uploaded_pdf = st.file_uploader("Upload IB Subject Results PDF", type="pdf")
 
-        def extract_subject_table(pdf_file):
+        def extract_subject_data_regex(uploaded_file):
+            import fitz
+            doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+            all_text = "\n".join([page.get_text() for page in doc])
+            doc.close()
+
+            pattern = re.compile(r"(.+?)\s+(\d+)\s+[\d\s]+(\d\.\d{2})\s+(\d\.\d{2})")
             subject_data = []
-            with pdfplumber.open(pdf_file) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if text:
-                        lines = text.split("\n")
-                        for line in lines:
-                            # Relaxed regex to tolerate layout changes
-                            match = re.search(r'(.+?)\s+(\d+)\s+.*?(\d\.\d{2})\s+(\d\.\d{2})', line)
-                            if match:
-                                raw_subject = match.group(1).strip()
-                                norm_subject = normalize(raw_subject)
-                                closest = get_close_matches(norm_subject, list(canonical_lookup.keys()), n=1, cutoff=0.85)
-                                if closest:
-                                    matched = canonical_lookup[closest[0]]
-                                    base_subject = normalize(" ".join(matched.split()[:-2]))  # drop HL/SL and Language
-                                    subject_data.append({
-                                        "Subject": matched,
-                                        "Base": base_subject,
-                                        "Avg School": float(match.group(3)),
-                                        "Avg World": float(match.group(4))
-                                    })
+
+            for match in pattern.finditer(all_text):
+                raw_subject = match.group(1).strip()
+                norm_subject = normalize(raw_subject)
+                closest = get_close_matches(norm_subject, list(canonical_lookup.keys()), n=1, cutoff=0.85)
+                if closest:
+                    matched = canonical_lookup[closest[0]]
+                    base_subject = normalize(" ".join(matched.split()[:-2]))  # drop HL/SL and Language
+                    subject_data.append({
+                        "Subject": matched,
+                        "Base": base_subject,
+                        "Avg School": float(match.group(3)),
+                        "Avg World": float(match.group(4))
+                    })
+
             return pd.DataFrame(subject_data)
 
-            
-
         if uploaded_pdf and year_input:
-            df_parsed = extract_subject_table(uploaded_pdf)
+            df_parsed = extract_subject_data_regex(uploaded_pdf)
             if not df_parsed.empty:
-                year = int(year_input)
-                st.session_state.uploaded_subject_data[year] = df_parsed
-                st.success(f"✅ Data for {year} uploaded successfully.")
+                st.session_state.uploaded_subject_data[int(year_input)] = df_parsed
+                st.success(f"✅ Data for {year_input} uploaded successfully.")
             else:
                 st.warning("⚠️ No valid data extracted from PDF.")
 
         if st.session_state.uploaded_subject_data:
             selected_year = st.selectbox("Select Year", sorted(st.session_state.uploaded_subject_data.keys()), index=0)
-            selected_group = st.selectbox(
-                "Select IB Group",
-                options=group_map.keys(),
-                format_func=lambda g: f"{g} - {group_map[g]}"
-            )
+            group_options = {
+                1: "1 - Studies in Language and Literature",
+                2: "2 - Language Acquisition",
+                3: "3 - Individuals and Societies",
+                4: "4 - Sciences",
+                5: "5 - Mathematics",
+                6: "6 - The Arts"
+            }
+            selected_group = st.selectbox("Select IB Group", options=group_options.keys(), format_func=lambda k: group_options[k])
 
             df_uploaded = st.session_state.uploaded_subject_data[selected_year]
-
-            # Filter subjects belonging to selected group
             group_subjects = [subj for subj, grp in group_mapping.items() if grp == selected_group]
             group_subjects_norm = [normalize(s) for s in group_subjects]
-
             filtered = df_uploaded[df_uploaded["Base"].isin(group_subjects_norm)]
 
             if not filtered.empty:
-                st.markdown(f"#### 📊 School vs World Averages for Group {selected_group} - {group_map[selected_group]} ({selected_year})")
-                fig, ax = plt.subplots(figsize=(10, 4))
+                st.markdown(f"#### 📊 School vs World Averages for {group_options[selected_group]} ({selected_year})")
+                fig, ax = plt.subplots(figsize=(11, 4))
 
                 bar_width = 0.4
-                index = range(len(filtered))
+                index = np.arange(len(filtered))
 
-                ax.bar(index, filtered["Avg School"], width=bar_width, label="School")
-                ax.bar([i + bar_width for i in index], filtered["Avg World"], width=bar_width, label="World")
+                ax.bar(index, filtered["Avg School"], width=bar_width, label="School", color="cornflowerblue")
+                ax.bar(index + bar_width, filtered["Avg World"], width=bar_width, label="World", color="orange")
 
-                ax.set_xticks([i + bar_width / 2 for i in index])
+                ax.set_xticks(index + bar_width / 2)
                 ax.set_xticklabels(filtered["Subject"], rotation=90)
                 ax.set_ylabel("Average Grade")
                 ax.set_ylim(0, 7)
                 ax.set_title("School vs World Averages by Subject")
                 ax.legend()
+
+                # Add value labels
+                for i, row in filtered.iterrows():
+                    ax.text(i, row["Avg School"] + 0.1, f"{row['Avg School']:.2f}", ha='center', fontsize=8)
+                    ax.text(i + bar_width, row["Avg World"] + 0.1, f"{row['Avg World']:.2f}", ha='center', fontsize=8)
+
                 st.pyplot(fig)
 
-                # 📊 Table Comparison
-                st.markdown("### 📊 School vs World Average Comparison Table")
-                filtered["Grade Gap"] = np.round(filtered["Avg School"] - filtered["Avg World"], 2)
-                filtered_sorted = filtered.sort_values(by="Grade Gap", ascending=False)
-
-                st.dataframe(filtered_sorted[["Subject", "Avg School", "Avg World", "Grade Gap"]].reset_index(drop=True).style.format({
-                    "Avg School": "{:.2f}",
-                    "Avg World": "{:.2f}",
-                    "Grade Gap": "{:+.2f}"
-                }).highlight_max(axis=0, subset=["Avg School", "Avg World"], color='lightgreen')
-                  .highlight_min(axis=0, subset=["Avg School", "Avg World"], color='salmon'),
-                  use_container_width=True)
+                # Table
+                st.markdown("### 📊 Comparison Table")
+                filtered["Grade Gap"] = filtered["Avg School"] - filtered["Avg World"]
+                st.dataframe(filtered[["Subject", "Avg School", "Avg World", "Grade Gap"]].style.format({
+                    "Avg School": "{:.2f}", "Avg World": "{:.2f}", "Grade Gap": "{:+.2f}"
+                }).highlight_max("Avg School", color="lightgreen")
+                .highlight_min("Avg World", color="salmon"), use_container_width=True)
             else:
                 st.warning("❌ No subjects from this group found in uploaded PDF.")
+
