@@ -912,6 +912,43 @@ with tab2:
 
 
         if uploaded_pdf and year_input:
+            import pdfplumber
+            import re
+            import pandas as pd
+            from difflib import get_close_matches
+
+            def normalize(name):
+                name = name.upper().strip()
+                name = re.sub(r"\(P\d{2}\)", "", name)
+                name = name.replace("&", "AND")
+                name = re.sub(r"[^A-Z0-9 ]", "", name)
+                name = re.sub(r"\s+", " ", name)
+                return name
+
+            def extract_subject_data_regex(pdf_file):
+                subject_data = []
+
+                with pdfplumber.open(pdf_file) as pdf:
+                    for page in pdf.pages:
+                        text = page.extract_text()
+                        if text:
+                            lines = text.split("\n")
+                            for line in lines:
+                                # Looks for a line like: SUBJECT NAME   20  ... 5.22  5.01
+                                match = re.search(r'(.+?)\s+(\d+)\s+.*?(\d\.\d{2})\s+(\d\.\d{2})', line)
+                                if match:
+                                    subject_name = match.group(1).strip()
+                                    avg_school = float(match.group(3))
+                                    avg_world = float(match.group(4))
+                                    subject_data.append({
+                                        "Raw": subject_name,
+                                        "Base": normalize(subject_name),
+                                        "Avg School": avg_school,
+                                        "Avg World": avg_world
+                                    })
+
+                return pd.DataFrame(subject_data)
+
             df_parsed = extract_subject_data_regex(uploaded_pdf)
             if not df_parsed.empty:
                 st.session_state.uploaded_subject_data[int(year_input)] = df_parsed
